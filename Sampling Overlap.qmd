@@ -1,0 +1,670 @@
+---
+title: "Sampling Overlap"
+author:
+- name: Jonathan Dombrosky
+  email: jdombrosky@crowcanyon.org
+editor: source
+self-contained: true
+date: now
+date-format: "MMMM D, YYYY h:mm A z"
+message: false
+warning: false
+echo: false
+---
+## Packages Needed
+```{r}
+library(tidyverse)
+library(SIBER)
+library(sf)
+library(spatstat)
+library(ggtext)
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+```
+
+## Import Data
+```{r}
+my_data <- read.table("Individual_Raptor.txt", header=T, 
+                     colClasses = c("character", "numeric", "character", 
+                                    "character", "character", "character", 
+                                    "numeric", "numeric", "numeric", "numeric"),
+                      fill = TRUE, sep = "\t")
+```
+
+## Create Functions
+### replace number(0) with 0
+```{r}
+replace_zero <- function(x) {
+     if(is.list(x)) lapply(x, replace_zero)
+     else ifelse(length(x) == 0, 0, x)
+}
+```
+
+## All Tissue 
+### SIBER
+```{r}
+all_tiss_SIBER <- my_data |>
+  dplyr::select(d13C, d15N, Individual) |>
+  dplyr::mutate(community = 1) |>
+  dplyr::rename(iso1 = d13C,
+                iso2 = d15N,
+                group = Individual) |> 
+  drop_na()
+
+siber.example <- createSiberObject(all_tiss_SIBER)
+
+community.hulls.args <- list(col = 1, lty = 1, lwd = 1)
+group.ellipses.args  <- list(n = 100, p.interval = 0.95, lty = 1, lwd = 2)
+group.hull.args      <- list(lty = 2, col = "grey20")
+
+plotSiberObject(siber.example,
+                ax.pad = 2, 
+                hulls = F, community.hulls.args, 
+                ellipses = F, group.ellipses.args,
+                group.hulls = F, group.hull.args,
+                bty = "L",
+                iso.order = c(1,2),
+                xlab=expression({delta}^13*C~'\u2030'),
+                ylab=expression({delta}^15*N~'\u2030'),
+                x.limits = c(-21.0, -13.0),
+                y.limits = c(4.0, 11.0),
+                cex = 1.5,
+                cex.axis = 1.5,
+                cex.lab = 1.5,
+                col.axis = "gray29",
+                col.lab = "gray29"
+)
+
+plotGroupEllipses(siber.example, n = 100, p.interval = 0.95, small.sample = TRUE,
+                    lty = 1, lwd = 3)
+
+group.ML3 <- groupMetricsML(siber.example)
+print(group.ML3)
+```
+
+```{r}
+w <- siberKapow(
+all_tiss_SIBER,
+isoNames = c("iso1", "iso2"),
+group = "group",
+pEll = 0.95
+)
+
+plot(w)
+area.owin(w)
+summary.owin(w)
+```
+
+Convert owin.coords to sf
+```{r}
+l = vector("list", 20)
+for (i in 1:20){
+  l[[i]] = st_as_sf(w[["owin.coords"]][[i]])
+}
+```
+
+Isolate polygon info from sf
+```{r}
+l2 = vector("list", 20)
+for (i in 1:20){
+l2[[i]] = l[[i]][["geom"]][[1]] #isolate polygons
+}
+```
+
+Convert so `st_intersection` can be calculated
+```{r}
+s <- st_sfc(l2)
+sf <-  st_sf(s)
+```
+
+```{r}
+i_all <- sf |> 
+  st_set_precision(50) |>  
+  st_make_valid() |> 
+  st_intersection() |> 
+  mutate(group = "All Tissue")
+
+i_all["n.overlaps"] |> 
+  st_collection_extract("POLYGON") |> 
+  plot(main = "All Tissue", breaks = 0:15, at = c(0, 5, 10, 15))
+
+total <- i_all |>
+  st_union() |>
+  st_area()
+  
+
+overlap <- i_all |>
+  dplyr::filter(!n.overlaps == 1) |>
+  st_union() |>
+  st_area()
+
+(overlap/total)*100
+```
+
+This plots unionized overlap
+```{r}
+z <- i_all |>
+ filter(!n.overlaps == 1) |>
+  st_union() |>
+  plot(main = "Unionized Overlapping Area")
+ 
+z 
+```
+
+### create function to sample `percent_overlap` per individual
+```{r}
+sample_overlap <- function(x) {
+  vec <- as.vector(replicate(30, {
+    sample <- slice_sample(sf, n = x, replace = FALSE)
+    
+    i <- tryCatch({
+      sample |> 
+        st_set_precision(40) |> 
+        st_make_valid() |> 
+        st_intersection()
+    }, error = function(e) {
+      NULL
+    })
+  
+    if (is.null(i)) {
+      return(NA)
+    }
+  
+  total <- i |> 
+    st_union() |> 
+    st_area()
+  
+  overlap <- i |> 
+    filter(!n.overlaps == 1) |> 
+    st_union() |> 
+    st_area()
+  
+  (overlap/total)*100
+  }))
+  
+  #create dataframe
+  if(x <= 2) # this code searches for no overlaps at a given sample size
+  {df <- data.frame(replace_zero(vec))
+  df <- t(df)
+  colnames(df) <- "percent_overlap"
+  rownames(df) <- NULL
+  df <- data.frame(df)
+  df <-  df |> 
+  mutate(individuals = x)
+  df}
+  
+  else
+  {df <- data.frame(vec)
+  colnames(df) <- "percent_overlap"
+  rownames(df) <- NULL
+  df <- data.frame(df)
+  df <-  df |> 
+  mutate(individuals = x)
+  df}
+}
+```
+
+## map `sample_overlap()` across different MNI values
+```{r, warning=FALSE}
+set.seed(972)
+all_tiss <- map(2:19, sample_overlap) |>  
+  list_rbind() |>  
+  mutate(group = "All Tissue")
+```
+
+## All Bones 
+### SIBER
+```{r}
+All_Bones_SIBER <- my_data |>
+  dplyr::filter(Tissue %in% "Bone") |>
+  dplyr::select(d13C, d15N, Individual) |>
+  dplyr::mutate(community = 1) |>
+  dplyr::rename(iso1 = d13C,
+                iso2 = d15N,
+                group = Individual)
+
+siber.example <- createSiberObject(All_Bones_SIBER)
+
+community.hulls.args <- list(col = 1, lty = 1, lwd = 1)
+group.ellipses.args  <- list(n = 100, p.interval = 0.95, lty = 1, lwd = 2)
+group.hull.args      <- list(lty = 2, col = "grey20")
+
+plotSiberObject(siber.example,
+                ax.pad = 2, 
+                hulls = F, community.hulls.args, 
+                ellipses = F, group.ellipses.args,
+                group.hulls = F, group.hull.args,
+                bty = "L",
+                iso.order = c(1,2),
+                xlab=expression({delta}^13*C~'\u2030'),
+                ylab=expression({delta}^15*N~'\u2030'),
+                x.limits = c(-21.0, -13.0),
+                y.limits = c(4.0, 11.0),
+                cex = 1.5,
+                cex.axis = 1.5,
+                cex.lab = 1.5,
+                col.axis = "gray29",
+                col.lab = "gray29"
+)
+
+plotGroupEllipses(siber.example, n = 100, p.interval = 0.95, small.sample = TRUE,
+                    lty = 1, lwd = 3)
+
+group.ML3 <- groupMetricsML(siber.example)
+print(group.ML3)
+```
+
+```{r}
+w <- siberKapow(
+All_Bones_SIBER,
+isoNames = c("iso1", "iso2"),
+group = "group",
+pEll = 0.95
+)
+
+plot(w)
+area(w)
+summary.owin(w)
+```
+
+Convert owin.coords to sf
+```{r}
+n = 20
+l = vector("list", n)
+for (i in 1:n){
+  l[[i]] = st_as_sf(w[["owin.coords"]][[i]])
+}
+```
+
+Isolate polygon info from sf
+```{r}
+n = 20
+l2 = vector("list", n)
+for (i in 1:n){
+l2[[i]] = l[[i]][["geom"]][[1]] #isolate polygons
+}
+```
+
+Convert so `st_intersection` can be calculated
+```{r}
+s = st_sfc(l2)
+sf <-  st_sf(s)
+```
+
+```{r}
+i_bone <- sf |> 
+  st_set_precision(50) |> 
+  st_make_valid() |> 
+  st_intersection() |> 
+  mutate(group = "All Bone")
+
+i_bone["n.overlaps"] |> 
+  st_collection_extract("POLYGON") |> 
+  plot(main = "All Bone", breaks = 0:15, at = c(0, 5, 10, 15))
+
+total <- i_bone |>
+  st_union() |>
+  st_area()
+  
+
+overlap <- i_bone |>
+  dplyr::filter(!n.overlaps == 1) |>
+  st_union() |>
+  st_area()
+
+(overlap/total)*100
+```
+
+This plots unionized overlap
+```{r}
+z <- i_bone |>
+ filter(!n.overlaps == 1) |>
+  st_union() |>
+  plot(main = "Unionized Overlapping Area")
+ 
+z 
+```
+
+### create function to sample `percent_overlap` per individual
+```{r}
+sample_overlap <- function(x) {
+  vec <- as.vector(replicate(30, {
+    sample <- slice_sample(sf, n = x, replace = FALSE)
+    
+    i <- tryCatch({
+      sample |> 
+        st_set_precision(40) |>
+        st_make_valid() |> 
+        st_intersection()
+    }, error = function(e) {
+      NULL
+    })
+  
+    if (is.null(i)) {
+      return(NA)
+    }
+  
+  total <- i |> 
+    st_union() |> 
+    st_area()
+  
+  overlap <- i |> 
+    filter(!n.overlaps == 1) |> 
+    st_union() |> 
+    st_area()
+  
+  (overlap/total)*100
+  }))
+  
+  #create dataframe
+  if(x <= 4) # this code searches for no overlaps at a given sample size
+  {df <- data.frame(replace_zero(vec))
+  df <- t(df)
+  colnames(df) <- "percent_overlap"
+  rownames(df) <- NULL
+  df <- data.frame(df)
+  df <-  df |> 
+  mutate(individuals = x)
+  df}
+  
+  else
+  {df <- data.frame(vec)
+  colnames(df) <- "percent_overlap"
+  rownames(df) <- NULL
+  df <- data.frame(df)
+  df <-  df |> 
+  mutate(individuals = x)
+  df}
+}
+```
+
+## map `sample_overlap()` across different MNI values
+```{r, warning=FALSE}
+set.seed(7959)
+all_bone <- map(2:19, sample_overlap) |>  
+  list_rbind() |>  
+  mutate(group = "All Bone")
+```
+
+## Long Bones
+### SIBER
+```{r}
+Long_Bones_SIBER <- my_data |>
+  dplyr::filter(Bone_Type %in% "Long") |>
+  dplyr::select(d13C, d15N, Individual) |>
+  dplyr::mutate(community = 1) |>
+  dplyr::rename(iso1 = d13C,
+                iso2 = d15N,
+                group = Individual)
+
+siber.example <- createSiberObject(Long_Bones_SIBER)
+
+community.hulls.args <- list(col = 1, lty = 1, lwd = 1)
+group.ellipses.args  <- list(n = 100, p.interval = 0.95, lty = 1, lwd = 2)
+group.hull.args      <- list(lty = 2, col = "grey20")
+
+plotSiberObject(siber.example,
+                ax.pad = 2, 
+                hulls = F, community.hulls.args, 
+                ellipses = F, group.ellipses.args,
+                group.hulls = F, group.hull.args,
+                bty = "L",
+                iso.order = c(1,2),
+                xlab=expression({delta}^13*C~'\u2030'),
+                ylab=expression({delta}^15*N~'\u2030'),
+                x.limits = c(-20.0, -14.0),
+                y.limits = c(4.0, 11.0),
+                cex = 1.5,
+                cex.axis = 1.5,
+                cex.lab = 1.5,
+                col.axis = "gray29",
+                col.lab = "gray29"
+)
+
+plotGroupEllipses(siber.example, n = 100, p.interval = 0.95, small.sample = TRUE,
+                    lty = 1, lwd = 3)
+
+group.ML5 <- groupMetricsML(siber.example)
+print(group.ML5)
+
+```
+
+```{r}
+w <- siberKapow(
+Long_Bones_SIBER,
+isoNames = c("iso1", "iso2"),
+group = "group",
+pEll = 0.95
+)
+
+plot(w)
+area(w)
+summary.owin(w)
+```
+
+Convert owin.coords to sf
+```{r}
+n = 20
+l = vector("list", n)
+for (i in 1:n){
+  l[[i]] = st_as_sf(w[["owin.coords"]][[i]])
+}
+```
+
+Isolate polygon info from sf
+```{r}
+n = 20
+l2 = vector("list", n)
+for (i in 1:n){
+l2[[i]] = l[[i]][["geom"]][[1]] #isolate polygons
+}
+```
+
+Convert SO `st_intersection` can be calculated
+```{r}
+s = st_sfc(l2)
+sf <-  st_sf(s)
+```
+
+```{r}
+i_long <- sf |> 
+  st_set_precision(50) |> 
+  st_make_valid() |> 
+  st_intersection() |> 
+  mutate(group = "Long Bone")
+
+i_long["n.overlaps"] |> 
+  st_collection_extract("POLYGON") |>
+  plot(main = "Long Bone", breaks = 0:15, at = c(0, 5, 10, 15))
+
+total <- i_long |>
+  st_union() |>
+  st_area()
+  
+
+overlap <- i_long |>
+  dplyr::filter(!n.overlaps == 1) |>
+  st_union() |>
+  st_area()
+
+(overlap/total)*100
+```
+
+This plots unionized overlap
+```{r}
+z <- i_long |>
+ dplyr::filter(!n.overlaps == 1) |>
+  st_union() |>
+  plot(main = "Unionized Overlapping Area")
+ 
+z 
+```
+
+```{r}
+sample_overlap <- function(x) {
+  vec <- as.vector(replicate(30, {
+    sample <- slice_sample(sf, n = x, replace = FALSE)
+    
+    i <- tryCatch({
+      sample |> 
+        st_set_precision(40) |> 
+        #lwgeom::st_snap_to_grid(0.05) |> 
+        st_make_valid() |> 
+        st_intersection()
+    }, error = function(e) {
+      NULL
+    })
+  
+    if (is.null(i)) {
+      return(NA)
+    }
+  
+  total <- i |> 
+    st_union() |> 
+    st_area()
+  
+  overlap <- i |> 
+    filter(!n.overlaps == 1) |> 
+    st_union() |> 
+    st_area()
+  
+  (overlap/total)*100
+  }))
+  
+  #create dataframe
+  if(x <= 5) # this code searches for no overlaps at a given sample size
+  {df <- data.frame(replace_zero(vec))
+  df <- t(df)
+  colnames(df) <- "percent_overlap"
+  rownames(df) <- NULL
+  df <- data.frame(df)
+  df <-  df |> 
+  mutate(individuals = x)
+  df}
+  
+  else
+  {df <- data.frame(vec)
+  colnames(df) <- "percent_overlap"
+  rownames(df) <- NULL
+  df <- data.frame(df)
+  df <-  df |> 
+  mutate(individuals = x)
+  df}
+}
+```
+
+## Long Bone Overlap
+```{r, warning=FALSE}
+set.seed(5941)
+long_bone <- map(2:19, sample_overlap) |>  
+  list_rbind() |>  
+  mutate(group = "Long Bone")
+```
+
+## Figures
+```{r}
+#| fig-height: 9.5
+#| fig.width: 5.5
+
+overlap_area <- bind_rows(i_all, i_bone, i_long) |> 
+  #st_collection_extract("POLYGON") |> 
+  filter(!n.overlaps == 1) |>
+  group_by(group) |> 
+  nest() |> 
+  mutate(overlap_union = map(data, st_union)) |> 
+  select(group, overlap_union) |> 
+  unnest(cols = overlap_union) |> 
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", 
+                                             "Long Bone"))) |> 
+  ungroup()
+
+
+all_area <- bind_rows(i_all, i_bone, i_long) |> 
+  #st_collection_extract("POLYGON") |> 
+  group_by(group) |> 
+  nest() |> 
+  mutate(all_union = map(data, st_union)) |> 
+  select(group, all_union) |> 
+  unnest(cols = all_union) |> 
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", 
+                                             "Long Bone"))) |> 
+  ungroup()
+
+area <- merge(all_area, overlap_area) |> 
+  pivot_longer(cols = c(all_union, overlap_union), names_to = "union_type",
+               values_to = "union") |> 
+  mutate(union_group = case_when(union_type == "all_union" ~ "Total area",
+                           union_type == "overlap_union" ~ "Overlapping area"))
+area |> 
+  ggplot() +
+  geom_sf(aes(geometry = union, color = union_group, fill = union_group,
+              linetype = union_group), 
+          linewidth = 0.5) +  
+  facet_wrap(~ group, ncol = 1) +
+  scale_fill_manual(values = c("gray", "transparent")) +
+  scale_color_manual(values = c("gray35", "black")) +
+  scale_linetype_manual(values = c(2, 1)) +
+  labs(x = "δ<sup>13</sup>C (‰)", y = "δ<sup>15</sup>N (‰)") +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 13, face = "bold"),
+        axis.title.x = element_markdown(size = 11, face = "bold"),
+        axis.title.y = element_markdown(size = 11, face = "bold"))
+
+ggsave("figs/fig_4.jpg", dpi = 300, height = 9.5, width = 5.5)
+```
+
+```{r}
+#| fig-height: 9.5
+#| fig.width: 5.5
+
+bind_rows(i_all, i_bone, i_long) |> 
+  st_collection_extract("POLYGON") |> 
+  
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", 
+                                             "Long Bone")),
+         n.overlaps = n.overlaps - 1) |> 
+  ggplot() +
+  geom_sf(aes(geometry = s, fill = n.overlaps), color = "black", 
+          linewidth = 0.1) +
+  facet_wrap(~ group, ncol = 1) +
+  labs(x = "δ<sup>13</sup>C (‰)", y = "δ<sup>15</sup>N (‰)", 
+       fill = "Number of\nOverlaps") +
+  scale_fill_viridis_c(option = "plasma") +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(size = 13, face = "bold"),
+        axis.title.x = element_markdown(size = 11, face = "bold"),
+        axis.title.y = element_markdown(size = 11, face = "bold"))
+
+ggsave("figs/fig_5.jpg", dpi = 300, height = 9.5, width = 5.5)
+```
+
+
+```{r}
+#| fig-height: 7
+#| fig.width: 5
+
+bind_rows(all_tiss, all_bone, long_bone) |> 
+  drop_na() |> 
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", "Long Bone")),
+         individuals = factor(individuals)) |> 
+  ggplot(aes(x = individuals, y = percent_overlap, group = individuals)) +
+  geom_jitter(size = 2.5, alpha = 0.20, width = 0.15) +
+  geom_boxplot(alpha = 0.6, linewidth = 0.5, outlier.shape = NA) +
+  theme_bw() +
+  facet_wrap(~ group, nrow = 3) +
+  labs(x = "Number of Individuals", y = "% Overlap") +
+  scale_color_grey() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 13, face = "bold"),
+        panel.grid.major.x = element_blank(),
+        axis.title = element_text(size = 11, face = "bold"),
+        axis.ticks.x = element_blank())
+
+ggsave("figs/fig_6.jpg", dpi = 300, height = 7, width = 5)
+```

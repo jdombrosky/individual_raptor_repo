@@ -1,0 +1,1044 @@
+---
+title: "Predictive Modeling"
+author:
+- name: Jonathan Dombrosky
+  email: jdombrosky@crowcanyon.org
+editor: source
+self-contained: true
+date: now
+date-format: "MMMM D, YYYY h:mm A z"
+message: false
+warning: false
+echo: false
+---
+
+## Libraries
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(ggtext)
+
+#model specific libraries
+library(discrim)
+library(MASS)
+library(ranger)
+library(kknn)
+
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+```
+
+## Import Data
+```{r}
+my_data <- as_tibble(read.table("Individual_Raptor.txt", 
+                      header = TRUE, colClasses = c("character", "character", 
+                                               "character", "character", 
+                                               "character", "character",
+                                               "numeric", "numeric", "numeric", 
+                                               "numeric"), 
+                      fill = TRUE, sep = "\t")) |> 
+  mutate(Individual = factor(Individual, levels = c(1, 2 ,3, 4, 5, 6, 7, 8, 9,
+                                                    10, 11, 12, 13, 14, 15, 16, 
+                                                    17, 18, 19, 20)))
+```
+
+## Model Specificaitons
+```{r}
+lda_spec <- discrim_linear() |> 
+  set_engine("MASS") |> 
+  set_mode("classification")
+
+rf_spec <- rand_forest(mtry = tune(), trees = 1000, min_n = tune()) |> 
+  set_engine("ranger") |> 
+  set_mode("classification")
+
+knn_spec <- nearest_neighbor(neighbors = tune(), weight_func = tune()) |> 
+   set_engine("kknn") |> 
+   set_mode("classification")
+```
+
+## Modeling δ13C and δ15N
+
+### Predicting Individuals from All Tissue
+
+#### Wrangle and Split Data
+```{r}
+set.seed(9234)
+
+my_data_all_tiss <- my_data |> 
+  dplyr::select(Individual, d13C, d15N, d2H)
+
+ind_split <- initial_split(my_data_all_tiss, prop = 0.80, strata = Individual, 
+                           pool = 0)
+ind_train <- training(ind_split)
+ind_test <- testing(ind_split)
+```
+
+#### Model Folds
+```{r}
+set.seed(4949)
+
+ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
+```
+#### Recipe
+```{r}
+ind_rec <- recipe(Individual ~ d13C + d15N, data = my_data_all_tiss) |> 
+  step_impute_mean(d13C, d15N)
+```
+
+#### Workflow Set
+```{r}
+workflows <- workflow_set(
+  preproc = list(simple = ind_rec),
+  models = list(LDA = lda_spec,
+                RF = rf_spec,
+                KNN = knn_spec))
+```
+
+#### Tune All Models
+```{r}
+grid_ctrl <- control_grid(save_pred = TRUE,
+                          parallel_over = "everything",
+                          save_workflow = TRUE)
+
+grid_results_all_tiss <- workflows |> 
+  workflow_map(seed = 3505,
+               resamples = ind_folds,
+               grid = 10,
+               control = grid_ctrl)
+```
+
+#### Count Number of Models Tuned
+```{r}
+grid_results_all_tiss |> 
+  rank_results() |> 
+  filter(.metric == "accuracy") |> 
+  dplyr::select(model, .config, accuracy = mean, rank) |> 
+  group_by(model) |> 
+  count()
+```
+#### Plot Performance
+
+##### Plot Results of Tuning Process
+```{r}
+autoplot(grid_results_all_tiss, id = "simple_KNN", metric = "accuracy") +
+  theme_bw()
+
+autoplot(grid_results_all_tiss, id = "simple_RF", metric = "accuracy") +
+  theme_bw()
+```
+
+##### Plot Best Model Configuration in Each Workflow for Accuracy
+```{r}
+autoplot(grid_results_all_tiss,
+         rank_metric = "accuracy",
+         metric = "accuracy",
+         select_best = TRUE) +
+  geom_text(aes(y = mean + 0.07, label = wflow_id), angle = 90, hjust = 0) +
+  lims(y = c(0, 1)) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+#### Extract Best Model
+```{r}
+best_lda <- grid_results_all_tiss |> 
+  extract_workflow_set_result("simple_LDA") |> 
+  select_best(metric = "accuracy")
+
+best_rf <- grid_results_all_tiss |> 
+  extract_workflow_set_result("simple_RF") |> 
+  select_best(metric = "accuracy")
+
+best_KNN <- grid_results_all_tiss |> 
+  extract_workflow_set_result("simple_KNN") |> 
+  select_best(metric = "accuracy")
+```
+
+#### Fit Best Model and View Performance on Test Set
+```{r}
+lda_results <- grid_results_all_tiss |> 
+  extract_workflow("simple_LDA") |>
+  finalize_workflow(best_lda) |> 
+  last_fit(split = ind_split)
+
+lda_metrics_tiss <- collect_metrics(lda_results) |> 
+  mutate(Workflow = "LDA")
+
+rf_results <- grid_results_all_tiss |> 
+  extract_workflow("simple_RF") |>
+  finalize_workflow(best_rf) |> 
+  last_fit(split = ind_split)
+
+rf_metrics_tiss <- collect_metrics(rf_results) |> 
+   mutate(Workflow = "RF")
+
+knn_results <- grid_results_all_tiss |> 
+  extract_workflow("simple_KNN") |>
+  finalize_workflow(best_KNN) |> 
+  last_fit(split = ind_split)
+
+knn_metrics_tiss <- collect_metrics(knn_results) |> 
+   mutate(Workflow = "KNN")
+
+cn_all_metrics_tiss <- rbind(lda_metrics_tiss, rf_metrics_tiss, 
+                             knn_metrics_tiss) |> 
+  mutate(group = "All Tissue")
+```
+
+### Predicting Individuals from All Bone
+
+#### Wrangle and Split Data
+```{r}
+set.seed(9226)
+
+my_data_bone <- my_data |> 
+  filter(Tissue == "Bone") |> 
+  dplyr::select(Individual, d13C, d15N, d2H)
+
+ind_split <- initial_split(my_data_bone, prop = 0.80, strata = Individual, 
+                           pool = 0)
+ind_train <- training(ind_split)
+ind_test <- testing(ind_split)
+```
+
+#### Model Folds
+```{r}
+set.seed(3999)
+
+ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
+```
+
+#### Recipe
+```{r}
+ind_rec <- recipe(Individual ~ d13C + d15N, data = my_data_bone) |> 
+  step_impute_mean(d13C, d15N)
+```
+
+#### Workflow Set
+```{r}
+workflows <- workflow_set(
+  preproc = list(simple = ind_rec),
+  models = list(LDA = lda_spec,
+                RF = rf_spec,
+                KNN = knn_spec))
+```
+
+#### Tune All Models
+```{r}
+grid_ctrl <- control_grid(save_pred = TRUE,
+                          parallel_over = "everything",
+                          save_workflow = TRUE)
+
+grid_results_all_bone <- workflows |> 
+  workflow_map(seed = 4486,
+               resamples = ind_folds,
+               grid = 10,
+               control = grid_ctrl)
+```
+
+#### Count Number of Models Tuned
+```{r}
+grid_results_all_bone |> 
+  rank_results() |> 
+  filter(.metric == "accuracy") |> 
+  dplyr::select(model, .config, accuracy = mean, rank) |> 
+  group_by(model) |> 
+  count()
+```
+
+#### Plot Performance
+
+##### Plot Results of Tuning Process
+```{r}
+autoplot(grid_results_all_bone, id = "simple_KNN", metric = "accuracy") +
+  theme_bw()
+
+autoplot(grid_results_all_bone, id = "simple_RF", metric = "accuracy") +
+  theme_bw()
+```
+
+##### Plot Best Model Configuration in Each Workflow for Accuracy
+```{r}
+autoplot(grid_results_all_bone,
+         rank_metric = "accuracy",
+         metric = "accuracy",
+         select_best = TRUE) +
+  geom_text(aes(y = mean + 0.06, label = wflow_id), angle = 90, hjust = 0) +
+  lims(y = c(0, 1)) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+#### Extract Best Model
+```{r}
+best_lda <- grid_results_all_bone |> 
+  extract_workflow_set_result("simple_LDA") |> 
+  select_best(metric = "accuracy")
+
+best_rf <- grid_results_all_bone |> 
+  extract_workflow_set_result("simple_RF") |> 
+  select_best(metric = "accuracy")
+
+best_KNN <- grid_results_all_bone |> 
+  extract_workflow_set_result("simple_KNN") |> 
+  select_best(metric = "accuracy")
+```
+
+#### Fit Best Model and View Performance on Test Set
+```{r}
+lda_results <- grid_results_all_bone |> 
+  extract_workflow("simple_LDA") |>
+  finalize_workflow(best_lda) |> 
+  last_fit(split = ind_split)
+
+lda_metrics_bone <- collect_metrics(lda_results) |> 
+  mutate(Workflow = "LDA")
+
+rf_results <- grid_results_all_bone |> 
+  extract_workflow("simple_RF") |>
+  finalize_workflow(best_rf) |> 
+  last_fit(split = ind_split)
+
+rf_metrics_bone <- collect_metrics(rf_results)|> 
+  mutate(Workflow = "RF")
+
+knn_results <- grid_results_all_bone |> 
+  extract_workflow("simple_KNN") |>
+  finalize_workflow(best_KNN) |> 
+  last_fit(split = ind_split)
+
+knn_metrics_bone <- collect_metrics(knn_results) |> 
+  mutate(Workflow = "KNN")
+
+cn_all_metrics_bone <- rbind(lda_metrics_bone, rf_metrics_bone, 
+                             knn_metrics_bone) |> 
+  mutate(group = "All Bone")
+```
+
+### Predicting Individuals from Long Bone
+
+#### Wrangle and Split Data
+```{r}
+set.seed(7051)
+
+my_data_long_bone <- my_data |> 
+  filter(Bone_Type == "Long") |> 
+  dplyr::select(Individual, d13C, d15N, d2H)
+
+ind_split <- initial_split(my_data_long_bone, prop = 0.80, strata = Individual, 
+                           pool = 0)
+ind_train <- training(ind_split)
+ind_test <- testing(ind_split)
+```
+
+#### Model Folds
+```{r}
+set.seed(5940)
+
+ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
+```
+
+#### Recipe
+```{r}
+ind_rec <- recipe(Individual ~ d13C + d15N, data = my_data_long_bone) |> 
+  step_impute_mean(d13C, d15N)
+```
+
+#### Workflow Set
+```{r}
+workflows <- workflow_set(
+  preproc = list(simple = ind_rec),
+  models = list(LDA = lda_spec,
+                RF = rf_spec,
+                KNN = knn_spec))
+```
+
+#### Tune All Models
+```{r}
+grid_ctrl <- control_grid(save_pred = TRUE,
+                          parallel_over = "everything",
+                          save_workflow = TRUE)
+
+grid_results_long_bone <- workflows |> 
+  workflow_map(seed = 7486,
+               resamples = ind_folds,
+               grid = 10,
+               control = grid_ctrl)
+```
+
+#### Count Number of Models Tuned
+```{r}
+grid_results_long_bone |> 
+  rank_results() |> 
+  filter(.metric == "accuracy") |> 
+  dplyr::select(model, .config, accuracy = mean, rank) |> 
+  group_by(model) |> 
+  count()
+```
+
+#### Plot Performance
+
+##### Plot Results of Tuning Process
+```{r}
+autoplot(grid_results_long_bone, id = "simple_KNN", metric = "accuracy") +
+  theme_bw()
+
+autoplot(grid_results_long_bone, id = "simple_RF", metric = "accuracy") +
+  theme_bw()
+```
+
+##### Plot Best Model Configuration in Each Workflow for Accuracy
+```{r}
+autoplot(grid_results_long_bone,
+         rank_metric = "accuracy",
+         metric = "accuracy",
+         select_best = TRUE) +
+  geom_text(aes(y = mean + 0.06, label = wflow_id), angle = 90, hjust = 0) +
+  lims(y = c(0, 1)) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+#### Extract Best Model
+```{r}
+best_lda <- grid_results_long_bone |> 
+  extract_workflow_set_result("simple_LDA") |> 
+  select_best(metric = "accuracy")
+
+best_rf <- grid_results_long_bone |> 
+  extract_workflow_set_result("simple_RF") |> 
+  select_best(metric = "accuracy")
+
+best_KNN <- grid_results_long_bone |> 
+  extract_workflow_set_result("simple_KNN") |> 
+  select_best(metric = "accuracy")
+```
+
+#### Fit Best Model and View Performance on Test Set
+```{r}
+lda_results <- grid_results_long_bone |> 
+  extract_workflow("simple_LDA") |>
+  finalize_workflow(best_lda) |> 
+  last_fit(split = ind_split)
+
+lda_metrics_long <- collect_metrics(lda_results) |> 
+  mutate(Workflow = "LDA")
+
+rf_results <- grid_results_long_bone |> 
+  extract_workflow("simple_RF") |>
+  finalize_workflow(best_rf) |> 
+  last_fit(split = ind_split)
+
+rf_metrics_long <- collect_metrics(rf_results) |> 
+  mutate(Workflow = "RF")
+
+knn_results <- grid_results_long_bone |> 
+  extract_workflow("simple_KNN") |>
+  finalize_workflow(best_KNN) |> 
+  last_fit(split = ind_split)
+
+knn_metrics_long <- collect_metrics(knn_results) |> 
+  mutate(Workflow = "KNN")
+
+cn_all_metrics_long <- rbind(lda_metrics_long, rf_metrics_long, 
+                             knn_metrics_long) |> 
+  mutate(group = "Long Bone")
+```
+
+### Combine All Grid Results for Carbon, Nitrogen, and Hydrogen
+```{r}
+rank_results_all_tiss <- grid_results_all_tiss |>
+  rank_results() |> 
+  mutate(group = "All Tissue")
+
+rank_results_all_bone <- grid_results_all_bone |> 
+  rank_results() |> 
+  mutate(group = "All Bone")
+
+rank_results_long_bone <- grid_results_long_bone |>
+  rank_results() |> 
+  mutate(group = "Long Bone")
+
+cn_rank_results <- rbind(rank_results_all_tiss, rank_results_all_bone, rank_results_long_bone)
+```
+
+```{r, fig.width = 4, fig.height = 9}
+cn_rank_results |>
+  group_by(group, wflow_id) |> 
+  filter(rank == min(rank),
+         .metric == "accuracy") |>
+  mutate(wflow_id = case_when(wflow_id == "simple_RF" ~ "RF",
+                              wflow_id == "simple_KNN" ~ "KNN",
+                              wflow_id == "simple_LDA" ~ "LDA"),
+         group = factor(group, levels = c("All Tissue", "All Bone", "Long Bone"))) |> 
+  ggplot(aes(x = reorder(wflow_id, mean), y = mean)) +
+  geom_pointrange(aes(ymin = mean - (std_err * sqrt(n)), 
+                      ymax = mean + (std_err * sqrt(n))), color = "darkgray",
+                  size = 0.75) +
+  geom_hline(yintercept = .50, lty = 2, size = 0.75) +
+  facet_wrap(~ group, ncol = 1) +
+  lims(y = c(0, 1)) +
+  labs(x = "Workflow", y = "accuracy") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.ticks.x = element_blank(),
+        axis.text = element_text(size = 10))
+```
+
+### Combine All Metrics on Test Set for Carbon and Nitrogen
+```{r, fig.width = 4, fig.height = 9}
+rbind(cn_all_metrics_tiss, cn_all_metrics_long, cn_all_metrics_bone)|> 
+  filter(.metric == "accuracy") |> 
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", 
+                                          "Long Bone"))) |> 
+  ggplot(aes(x = reorder(Workflow, .estimate), y = .estimate)) +
+  geom_bar(stat = "identity", fill = "darkgray") +
+  facet_wrap(~ group, ncol = 1) +
+  labs(x = "Workflow", y = "accuracy") +
+  geom_hline(yintercept = .50, lty = 2, size = 0.75) +
+  scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  theme_bw() +
+  geom_text(aes(y = .estimate - 0.03, 
+                label = format(round(.estimate, digits = 2), nsmall = 2)), 
+            angle = 0, hjust = 0.5, size = 3.5, color = "white") +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(size = 10))
+```
+
+## Modeling δ13C, δ15N, and δ2H
+
+### Predicting Individuals from All Tissue
+
+#### Wrangle and Split Data
+```{r}
+set.seed(3782)
+
+my_data_all_tiss <- my_data |> 
+  dplyr::select(Individual, d13C, d15N, d2H)
+
+ind_split <- initial_split(my_data_all_tiss, prop = 0.80, strata = Individual, 
+                           pool = 0)
+ind_train <- training(ind_split)
+ind_test <- testing(ind_split)
+```
+
+#### Model Folds
+```{r}
+set.seed(5952)
+
+ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
+```
+#### Recipe
+```{r}
+ind_rec <- recipe(Individual ~ d13C + d15N + d2H, data = my_data_all_tiss) |> 
+  step_impute_mean(d13C, d15N, d2H)
+```
+
+#### Workflow Set
+```{r}
+workflows <- workflow_set(
+  preproc = list(simple = ind_rec),
+  models = list(LDA = lda_spec,
+                RF = rf_spec,
+                KNN = knn_spec))
+```
+
+#### Tune All Models
+```{r}
+grid_ctrl <- control_grid(save_pred = TRUE,
+                          parallel_over = "everything",
+                          save_workflow = TRUE)
+
+grid_results_all_tiss <- workflows |> 
+  workflow_map(seed = 7368,
+               resamples = ind_folds,
+               grid = 10,
+               control = grid_ctrl)
+```
+
+#### Count Number of Models Tuned
+```{r}
+grid_results_all_tiss |> 
+  rank_results() |> 
+  filter(.metric == "accuracy") |> 
+  dplyr::select(model, .config, accuracy = mean, rank) |> 
+  group_by(model) |> 
+  count()
+```
+#### Plot Performance
+
+##### Plot Results of Tuning Process
+```{r}
+autoplot(grid_results_all_tiss, id = "simple_KNN", metric = "accuracy") +
+  theme_bw()
+
+autoplot(grid_results_all_tiss, id = "simple_RF", metric = "accuracy") +
+  theme_bw()
+```
+
+##### Plot Best Model Configuration in Each Workflow for Accuracy
+```{r}
+autoplot(grid_results_all_tiss,
+         rank_metric = "accuracy",
+         metric = "accuracy",
+         select_best = TRUE) +
+  geom_text(aes(y = mean + 0.07, label = wflow_id), angle = 90, hjust = 0) +
+  lims(y = c(0, 1)) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+#### Extract Best Model
+```{r}
+best_lda <- grid_results_all_tiss |> 
+  extract_workflow_set_result("simple_LDA") |> 
+  select_best(metric = "accuracy")
+
+best_rf <- grid_results_all_tiss |> 
+  extract_workflow_set_result("simple_RF") |> 
+  select_best(metric = "accuracy")
+
+best_KNN <- grid_results_all_tiss |> 
+  extract_workflow_set_result("simple_KNN") |> 
+  select_best(metric = "accuracy")
+```
+
+#### Fit Best Model and View Performance on Test Set
+```{r}
+lda_results <- grid_results_all_tiss |> 
+  extract_workflow("simple_LDA") |>
+  finalize_workflow(best_lda) |> 
+  last_fit(split = ind_split)
+
+lda_metrics_tiss <- collect_metrics(lda_results) |> 
+  mutate(Workflow = "LDA")
+
+rf_results <- grid_results_all_tiss |> 
+  extract_workflow("simple_RF") |>
+  finalize_workflow(best_rf) |> 
+  last_fit(split = ind_split)
+
+rf_metrics_tiss <- collect_metrics(rf_results) |> 
+   mutate(Workflow = "RF")
+
+knn_results <- grid_results_all_tiss |> 
+  extract_workflow("simple_KNN") |>
+  finalize_workflow(best_KNN) |> 
+  last_fit(split = ind_split)
+
+knn_metrics_tiss <- collect_metrics(knn_results) |> 
+   mutate(Workflow = "KNN")
+
+cnh_all_metrics_tiss <- rbind(lda_metrics_tiss, rf_metrics_tiss, 
+                              knn_metrics_tiss) |> 
+  mutate(group = "All Tissue")
+```
+
+### Predicting Individuals from All Bone
+
+#### Wrangle and Split Data
+```{r}
+set.seed(5073)
+
+my_data_bone <- my_data |> 
+  filter(Tissue == "Bone") |> 
+  dplyr::select(Individual, d13C, d15N, d2H)
+
+ind_split <- initial_split(my_data_bone, prop = 0.80, strata = Individual, 
+                           pool = 0)
+ind_train <- training(ind_split)
+ind_test <- testing(ind_split)
+```
+
+#### Model Folds
+```{r}
+set.seed(3229)
+
+ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
+```
+
+#### Recipe
+```{r}
+ind_rec <- recipe(Individual ~ d13C + d15N + d2H, data = my_data_bone) |> 
+  step_impute_mean(d13C, d15N, d2H)
+```
+
+#### Workflow Set
+```{r}
+workflows <- workflow_set(
+  preproc = list(simple = ind_rec),
+  models = list(LDA = lda_spec,
+                RF = rf_spec,
+                KNN = knn_spec))
+```
+
+#### Tune All Models
+```{r}
+grid_ctrl <- control_grid(save_pred = TRUE,
+                          parallel_over = "everything",
+                          save_workflow = TRUE)
+
+grid_results_all_bone <- workflows |> 
+  workflow_map(seed = 1406,
+               resamples = ind_folds,
+               grid = 10,
+               control = grid_ctrl)
+```
+
+#### Count Number of Models Tuned
+```{r}
+grid_results_all_bone |> 
+  rank_results() |> 
+  filter(.metric == "accuracy") |> 
+  dplyr::select(model, .config, accuracy = mean, rank) |> 
+  group_by(model) |> 
+  count()
+```
+
+#### Plot Performance
+
+##### Plot Results of Tuning Process
+```{r}
+autoplot(grid_results_all_bone, id = "simple_KNN", metric = "accuracy") +
+  theme_bw()
+
+autoplot(grid_results_all_bone, id = "simple_RF", metric = "accuracy") +
+  theme_bw()
+```
+
+##### Plot Best Model Configuration in Each Workflow for Accuracy
+```{r}
+autoplot(grid_results_all_bone,
+         rank_metric = "accuracy",
+         metric = "accuracy",
+         select_best = TRUE) +
+  geom_text(aes(y = mean + 0.06, label = wflow_id), angle = 90, hjust = 0) +
+  lims(y = c(0, 1)) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+#### Extract Best Model
+```{r}
+best_lda <- grid_results_all_bone |> 
+  extract_workflow_set_result("simple_LDA") |> 
+  select_best(metric = "accuracy")
+
+best_rf <- grid_results_all_bone |> 
+  extract_workflow_set_result("simple_RF") |> 
+  select_best(metric = "accuracy")
+
+best_KNN <- grid_results_all_bone |> 
+  extract_workflow_set_result("simple_KNN") |> 
+  select_best(metric = "accuracy")
+```
+
+#### Fit Best Model and View Performance on Test Set
+```{r}
+lda_results <- grid_results_all_bone |> 
+  extract_workflow("simple_LDA") |>
+  finalize_workflow(best_lda) |> 
+  last_fit(split = ind_split)
+
+lda_metrics_bone <- collect_metrics(lda_results) |> 
+  mutate(Workflow = "LDA")
+
+rf_results <- grid_results_all_bone |> 
+  extract_workflow("simple_RF") |>
+  finalize_workflow(best_rf) |> 
+  last_fit(split = ind_split)
+
+rf_metrics_bone <- collect_metrics(rf_results)|> 
+  mutate(Workflow = "RF")
+
+knn_results <- grid_results_all_bone |> 
+  extract_workflow("simple_KNN") |>
+  finalize_workflow(best_KNN) |> 
+  last_fit(split = ind_split)
+
+knn_metrics_bone <- collect_metrics(knn_results) |> 
+  mutate(Workflow = "KNN")
+
+cnh_all_metrics_bone <- rbind(lda_metrics_bone, rf_metrics_bone, 
+                              knn_metrics_bone) |> 
+  mutate(group = "All Bone")
+```
+
+### Predicting Individuals from Long Bone
+
+#### Wrangle and Split Data
+```{r}
+set.seed(2746)
+
+my_data_long_bone <- my_data |> 
+  filter(Bone_Type == "Long") |> 
+  dplyr::select(Individual, d13C, d15N, d2H)
+
+ind_split <- initial_split(my_data_long_bone, prop = 0.80, strata = Individual, 
+                           pool = 0)
+ind_train <- training(ind_split)
+ind_test <- testing(ind_split)
+```
+
+#### Model Folds
+```{r}
+set.seed(4532)
+
+ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
+```
+
+#### Recipe
+```{r}
+ind_rec <- recipe(Individual ~ d13C + d15N + d2H, data = my_data_long_bone) |> 
+  step_impute_mean(d13C, d15N, d2H)
+```
+
+#### Workflow Set
+```{r}
+workflows <- workflow_set(
+  preproc = list(simple = ind_rec),
+  models = list(LDA = lda_spec,
+                RF = rf_spec,
+                KNN = knn_spec))
+```
+
+#### Tune All Models
+```{r}
+grid_ctrl <- control_grid(save_pred = TRUE,
+                          parallel_over = "everything",
+                          save_workflow = TRUE)
+
+grid_results_long_bone <- workflows |> 
+  workflow_map(seed = 3207,
+               resamples = ind_folds,
+               grid = 10,
+               control = grid_ctrl)
+```
+
+#### Count Number of Models Tuned
+```{r}
+grid_results_long_bone |> 
+  rank_results() |> 
+  filter(.metric == "accuracy") |> 
+  dplyr::select(model, .config, accuracy = mean, rank) |> 
+  group_by(model) |> 
+  count()
+```
+
+#### Plot Performance
+
+##### Plot Results of Tuning Process
+```{r}
+autoplot(grid_results_long_bone, id = "simple_KNN", metric = "accuracy") +
+  theme_bw()
+
+autoplot(grid_results_long_bone, id = "simple_RF", metric = "accuracy") +
+  theme_bw()
+```
+
+##### Plot Best Model Configuration in Each Workflow for Accuracy
+```{r}
+autoplot(grid_results_long_bone,
+         rank_metric = "accuracy",
+         metric = "accuracy",
+         select_best = TRUE) +
+  geom_text(aes(y = mean + 0.06, label = wflow_id), angle = 90, hjust = 0) +
+  lims(y = c(0, 1)) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+#### Extract Best Model
+```{r}
+best_lda <- grid_results_long_bone |> 
+  extract_workflow_set_result("simple_LDA") |> 
+  select_best(metric = "accuracy")
+
+best_rf <- grid_results_long_bone |> 
+  extract_workflow_set_result("simple_RF") |> 
+  select_best(metric = "accuracy")
+
+best_KNN <- grid_results_long_bone |> 
+  extract_workflow_set_result("simple_KNN") |> 
+  select_best(metric = "accuracy")
+```
+
+#### Fit Best Model and View Performance on Test Set
+```{r}
+lda_results <- grid_results_long_bone |> 
+  extract_workflow("simple_LDA") |>
+  finalize_workflow(best_lda) |> 
+  last_fit(split = ind_split)
+
+lda_metrics_long <- collect_metrics(lda_results) |> 
+  mutate(Workflow = "LDA")
+
+rf_results <- grid_results_long_bone |> 
+  extract_workflow("simple_RF") |>
+  finalize_workflow(best_rf) |> 
+  last_fit(split = ind_split)
+
+rf_metrics_long <- collect_metrics(rf_results) |> 
+  mutate(Workflow = "RF")
+
+knn_results <- grid_results_long_bone |> 
+  extract_workflow("simple_KNN") |>
+  finalize_workflow(best_KNN) |> 
+  last_fit(split = ind_split)
+
+knn_metrics_long <- collect_metrics(knn_results) |> 
+  mutate(Workflow = "KNN")
+
+cnh_all_metrics_long <- rbind(lda_metrics_long, rf_metrics_long, 
+                              knn_metrics_long) |> 
+  mutate(group = "Long Bone")
+```
+
+### Combine All Grid Results for Carbon, Nitrogen, and Hydrogen
+```{r}
+rank_results_all_tiss <- grid_results_all_tiss |>
+  rank_results() |> 
+  mutate(group = "All Tissue")
+
+rank_results_all_bone <- grid_results_all_bone |> 
+  rank_results() |> 
+  mutate(group = "All Bone")
+
+rank_results_long_bone <- grid_results_long_bone |>
+  rank_results() |> 
+  mutate(group = "Long Bone")
+
+cnh_rank_results <- rbind(rank_results_all_tiss, rank_results_all_bone,
+                          rank_results_long_bone)
+```
+
+```{r, fig.width = 4, fig.height = 9}
+cnh_rank_results |>
+  group_by(group, wflow_id) |> 
+  filter(rank == min(rank),
+         .metric == "accuracy") |>
+  mutate(wflow_id = case_when(wflow_id == "simple_RF" ~ "RF",
+                              wflow_id == "simple_KNN" ~ "KNN",
+                              wflow_id == "simple_LDA" ~ "LDA"),
+         group = factor(group, levels = c("All Tissue", "All Bone", "Long Bone"))) |> 
+  ggplot(aes(x = reorder(wflow_id, mean), y = mean)) +
+  geom_pointrange(aes(ymin = mean - (std_err * sqrt(n)), 
+                      ymax = mean + (std_err * sqrt(n))), color = "darkgray",
+                  size = 0.75) +
+  geom_hline(yintercept = .50, lty = 2, size = 0.75) +
+  facet_wrap(~ group, ncol = 1) +
+  lims(y = c(0, 1)) +
+  labs(x = "Workflow", y = "accuracy") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.ticks.x = element_blank(),
+        axis.text = element_text(size = 10))
+```
+
+### Combine All Metrics on Test Set for Carbon, Nitrogen, and Hydrogen
+```{r, fig.width = 4, fig.height = 9}
+rbind(cnh_all_metrics_tiss, cnh_all_metrics_long, cnh_all_metrics_bone) |> 
+  filter(.metric == "accuracy") |> 
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", 
+                                          "Long Bone"))) |> 
+  ggplot(aes(x = reorder(Workflow, .estimate), y = .estimate)) +
+  geom_bar(stat = "identity", fill = "darkgray") +
+  facet_wrap(~ group, ncol = 1) +
+  labs(x = "Workflow", y = "accuracy") +
+  geom_hline(yintercept = .50, lty = 2, size = 0.75) +
+  scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  theme_bw() +
+  geom_text(aes(y = .estimate - 0.03, 
+                label = format(round(.estimate, digits = 2), nsmall = 2)), 
+            angle = 0, hjust = 0.5, size = 3.5, color = "white") +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(size = 10))
+```
+
+## Combine All Grid Results for Different Model Aggregates
+
+```{r}
+#| fig-height: 5.5
+#| fig.width: 5.5
+
+cn_rank_results <- cn_rank_results |>
+  mutate(model_agg = "δ<sup>13</sup>C + δ<sup>15</sup>N")
+  
+cnh_rank_results <- cnh_rank_results |>
+  mutate(model_agg = "δ<sup>13</sup>C + δ<sup>15</sup>N + δ<sup>2</sup>H")
+  
+rbind(cn_rank_results, cnh_rank_results) |> 
+  group_by(model_agg, group, wflow_id) |> 
+  filter(rank == min(rank),
+         .metric == "accuracy") |>
+  mutate(wflow_id = case_when(wflow_id == "simple_RF" ~ "RF",
+                              wflow_id == "simple_KNN" ~ "KNN",
+                              wflow_id == "simple_LDA" ~ "LDA"),
+         group = factor(group, levels = c("All Tissue", "All Bone", "Long Bone"))) |> 
+  ggplot(aes(x = reorder(wflow_id, mean), y = mean)) +
+  geom_pointrange(aes(ymin = mean - (std_err * sqrt(n)), 
+                      ymax = mean + (std_err * sqrt(n))), color = "darkgray",
+                  size = 0.75) +
+  geom_hline(yintercept = .50, lty = 2, size = 0.75) +
+  facet_grid(group ~ model_agg) +
+  lims(y = c(0, 1)) +
+  labs(x = "Workflow", y = "accuracy") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text.x = element_markdown(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.ticks.x = element_blank(),
+        axis.text = element_text(size = 10))
+
+ggsave("figs/fig_6.jpg", dpi = 300, height = 5.5, width = 5.5)
+```
+
+
+## Combine All Test Set Metrics for Different Model Aggregates
+```{r}
+#| fig-height: 5.5
+#| fig.width: 5.5
+
+cn_metrics <- rbind(cn_all_metrics_tiss, cn_all_metrics_long, cn_all_metrics_bone) |> 
+  mutate(model_agg = "δ<sup>13</sup>C + δ<sup>15</sup>N")
+
+cnh_metrics <- rbind(cnh_all_metrics_tiss, cnh_all_metrics_long, cnh_all_metrics_bone) |> 
+  mutate(model_agg = "δ<sup>13</sup>C + δ<sup>15</sup>N + δ<sup>2</sup>H")
+
+rbind(cnh_metrics, cn_metrics) |> 
+  filter(.metric == "accuracy") |> 
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", 
+                                          "Long Bone")),
+         model_agg = factor(model_agg, levels = c("δ<sup>13</sup>C + δ<sup>15</sup>N", "δ<sup>13</sup>C + δ<sup>15</sup>N + δ<sup>2</sup>H"))) |> 
+  ggplot(aes(x = reorder(Workflow, .estimate), y = .estimate)) +
+  geom_bar(stat = "identity", fill = "darkgray") +
+  facet_grid(group ~ model_agg) +
+  labs(x = "Workflow", y = "accuracy") +
+  geom_hline(yintercept = .50, lty = 2, size = 0.75) +
+  scale_y_continuous(limits = c(0, 1)) +
+  theme_bw() +
+  geom_text(aes(y = .estimate - 0.04, 
+                label = format(round(.estimate, digits = 2), nsmall = 2)), 
+            angle = 0, hjust = 0.5, size = 3.5, color = "white") +
+  theme(panel.grid = element_blank(),
+        strip.text.x = element_markdown(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(size = 10))
+
+ggsave("figs/fig_7.jpg", dpi = 300, height = 5.5, width = 5.5)
+```

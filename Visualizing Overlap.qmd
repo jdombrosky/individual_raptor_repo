@@ -1,0 +1,251 @@
+---
+title: "Visualizing Overlap"
+author:
+- name: Jonathan Dombrosky
+  email: jdombrosky@crowcanyon.org
+editor: source
+self-contained: true
+date: now
+date-format: "MMMM D, YYYY h:mm A z"
+message: false
+warning: false
+echo: false
+---
+
+## Libraries
+```{r}
+library(tidyverse)
+library(ggtext)
+library(SIBER)
+library(ggpubr)
+library(cowplot)
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+```
+
+## Import Data
+```{r}
+my_data <- read.table("Individual_Raptor.txt", 
+                      header = TRUE, 
+                      fill = TRUE, sep = "\t")
+```
+
+```{r}
+all_tissue <- my_data |> 
+  select(Individual, d13C, d15N, d2H) |> 
+  mutate(group = "All Tissue")
+
+all_bone <- my_data |> 
+  filter(Tissue == "Bone") |> 
+  select(Individual, d13C, d15N, d2H) |> 
+  mutate(group = "All Bone")
+
+long_bone <- my_data |> 
+  filter(Bone_Type == "Long") |> 
+  select(Individual, d13C, d15N, d2H) |> 
+  mutate(group = "Long Bone")
+
+group_data <- bind_rows(all_tissue, all_bone, long_bone)
+```
+
+## SIBER 95% Ellipses
+```{r}
+all_tiss <- my_data |>
+  dplyr::select(d13C, d15N, d2H, Individual) |>
+  dplyr::mutate(community = 1) |>
+  dplyr::rename(iso1 = d13C,
+                iso2 = d15N,
+                iso3 = d2H,
+                group = Individual) |> 
+  drop_na()
+
+all_bones <- my_data |>
+  dplyr::filter(Tissue %in% "Bone") |>
+  dplyr::select(d13C, d15N, d2H, Individual) |>
+  dplyr::mutate(community = 1) |>
+  dplyr::rename(iso1 = d13C,
+                iso2 = d15N,
+                iso3 = d2H,
+                group = Individual)
+
+long_bones <- my_data |>
+  dplyr::filter(Bone_Type %in% "Long") |>
+  dplyr::select(d13C, d15N, d2H, Individual) |>
+  dplyr::mutate(community = 1) |>
+  dplyr::rename(iso1 = d13C,
+                iso2 = d15N,
+                iso3 = d2H,
+                group = Individual)
+```
+
+### Carbon and Nitrogen
+```{r}
+all_kapow_CN <- siberKapow(all_tiss, isoNames = c("iso1", "iso2"), 
+                        group = "group", pEll = 0.95) |> 
+  pluck("ell.coords") |> 
+  mutate(name = "All Tissue")
+
+bone_kapow_CN <- siberKapow(all_bones, isoNames = c("iso1", "iso2"), 
+                        group = "group", pEll = 0.95) |> 
+  pluck("ell.coords") |> 
+  mutate(name = "All Bone")
+
+long_kapow_CN <- siberKapow(long_bones, isoNames = c("iso1", "iso2"), 
+                        group = "group", pEll = 0.95) |> 
+  pluck("ell.coords") |> 
+  mutate(name = "Long Bone")
+
+kapow_CN <- rbind(all_kapow_CN, bone_kapow_CN, long_kapow_CN) |> 
+  mutate(group = factor(group),
+         name = factor(name, levels = c("All Tissue", "All Bone", "Long Bone")),
+         iso_system = "δ<sup>13</sup>C & δ<sup>15</sup>N")
+```
+
+### Carbon and Hydrogen
+```{r}
+all_kapow_CH <- siberKapow(all_tiss, isoNames = c("iso1", "iso3"), 
+                        group = "group", pEll = 0.95) |> 
+  pluck("ell.coords") |>
+  mutate(name = "All Tissue")
+
+bone_kapow_CH <- siberKapow(all_bones, isoNames = c("iso1", "iso3"), 
+                        group = "group", pEll = 0.95) |> 
+  pluck("ell.coords") |> 
+  mutate(name = "All Bone")
+
+long_kapow_CH <- siberKapow(long_bones, isoNames = c("iso1", "iso3"), 
+                        group = "group", pEll = 0.95) |> 
+  pluck("ell.coords") |> 
+  mutate(name = "Long Bone")
+
+kapow_CH <- rbind(all_kapow_CH, bone_kapow_CH, long_kapow_CH) |> 
+  mutate(group = factor(group),
+         name = factor(name, levels = c("All Tissue", "All Bone", "Long Bone")),
+         iso_system = "δ<sup>13</sup>C & δ<sup>2</sup>H")
+```
+
+```{r}
+colors <- rep("gray", times = 20)
+
+fills <- rep("gray", times = 20)
+
+cn_plot <- kapow_CN |> 
+  ggplot(aes(x = X1, y = X2, group = group)) +
+  geom_polygon(alpha = 0.4, linewidth = 0.5, color = "black") +
+  scale_fill_manual(values = fills) +
+  scale_color_manual(values = colors) +
+  facet_wrap(~ name, nrow = 3) +
+  theme_bw() +
+  labs(x = "δ<sup>13</sup>C (‰)",
+       y = "δ<sup>15</sup>N (‰)") +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        panel.grid.major = element_blank(),
+        #panel.grid.minor = element_blank(),
+        strip.text.x = element_text(size = 13, face = "bold"),
+        axis.title.x = element_markdown(size = 11, face = "bold"),
+        axis.title.y = element_markdown(size = 11, face = "bold"))
+```
+
+```{r}
+colors <- rep("gray", times = 20)
+
+fills <- rep("gray", times = 20)
+
+ch_plot <- kapow_CH |> 
+  ggplot(aes(x = X1, y = X2, group = group)) +
+  geom_polygon(alpha = 0.4, linewidth = 0.5, color = "black") +
+  scale_fill_manual(values = fills) +
+  scale_color_manual(values = colors) +
+  facet_wrap(~ name, nrow = 3) +
+  theme_bw() +
+  labs(x = "δ<sup>13</sup>C (‰)",
+       y = "δ<sup>2</sup>H (‰)") +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        panel.grid.major = element_blank(),
+       # panel.grid.minor = element_blank(),
+        strip.text.x = element_text(size = 13, face = "bold"),
+        axis.title.x = element_markdown(size = 11, face = "bold"),
+        axis.title.y = element_markdown(size = 11, face = "bold"))
+```
+
+```{r}
+#| fig-height: 7.5
+#| fig.width: 8
+
+plot_grid(cn_plot, ch_plot, labels = "AUTO", label_colour = "#4d4d4d",  
+          label_size = 20, ncol = 2)
+
+ggsave("figs/fig_1.jpg", dpi = 300, height = 7.5, width = 8)
+```
+
+## Maximum Isotopic Difference per Individual
+```{r}
+diff_plot <- group_data |> 
+  drop_na(d13C) |> 
+  group_by(group, Individual) |> 
+  summarize(min_c = min(d13C),
+            max_c = max(d13C),
+            min_n = min(d15N),
+            max_n = max(d15N),
+            min_h = min(d2H),
+            max_h = max(d2H), .groups = "keep") |> 
+  mutate(c_diff = abs(max_c - min_c),
+         n_diff = abs(max_n - min_n),
+         h_diff = abs(max_h - min_h)) |> 
+  select(group, Individual, c_diff, n_diff, h_diff) |> 
+  pivot_longer(cols = 3:5, names_to = "iso_system", 
+               values_to = "diff") |> 
+  mutate(iso_system = case_when(str_detect(iso_system, "c_") ~ "δ<sup>13</sup>C",
+                                str_detect(iso_system, "n_") ~ "δ<sup>15</sup>N",
+                                str_detect(iso_system, "h_") ~ "δ<sup>2</sup>H"))
+  
+```
+
+```{r}
+#| fig-height: 3
+#| fig.width: 7.5
+
+diff_plot |> 
+  mutate(group = factor(group, levels = c("All Tissue", "All Bone", "Long Bone"))) |> 
+  ggplot(aes(x = group, y = diff)) +
+  geom_jitter(size = 3, alpha = 0.25, width = 0.25) +
+  geom_boxplot(size = 0.75, alpha = 0.60, outlier.shape = NA) +
+  facet_wrap(~ iso_system, scales = "free", nrow = 3, ncol = 3) +
+  labs(y = "Range per Individual (‰)",
+       x = "Tissue Group") +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        strip.text.x = element_markdown(size = 13, face = "bold"),
+        axis.title = element_text(size = 11, face = "bold"),
+        panel.grid.major.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+ggsave("figs/fig_2.jpg", dpi = 300, height = 3, width = 7.5)
+```
+
+## Lipid Contamination
+```{r}
+#| fig-height: 6
+#| fig.width: 10
+
+my_data |> 
+  mutate(CNatomic = CN * (14/12)) |> 
+  select(Individual, d13C, CNatomic, Bone_Type) |> 
+  drop_na() |> 
+  ggplot(aes(x = CNatomic, y = d13C)) + 
+  geom_point(aes(color = Bone_Type), size = 3, alpha = 0.5) + 
+  geom_smooth(method = "lm", formula = y ~ x) +
+  stat_cor(aes(label = after_stat(rr.label)), geom = "label", alpha = 0.5, 
+           r.accuracy = 0.01, label.y = -20) +
+  facet_wrap(~ Individual) +
+  theme_bw() +
+  labs(x = "C:N<sub>atomic</sub>", y = "δ<sup>13</sup>C (‰)") +
+  theme(strip.background = element_blank(),
+        strip.text.x = element_text(size = 13, face = "bold"),
+        axis.title.x = element_markdown(size = 11, face = "bold"),
+        axis.title.y = element_markdown(size = 11, face = "bold"))
+```
+
