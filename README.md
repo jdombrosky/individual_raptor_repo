@@ -1,4 +1,27 @@
-# individual_raptor_repo
+Individuals from Isotopes: Can Stable Isotopes Distinguish the Remains of 
+Different Cooper’s Hawks (*Astur cooperii*)?
+--------------------------------------
+
+<table>
+<colgroup>
+<col width="50%" />
+<col width="50%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td align="left"><strong>Corresponding Author:</strong>
+Jonathan Dombrosky</td>
+<td align="left"><strong>Contact:</strong>
+jdombrosky at crowcanyon.org</td>
+</tr>
+</tbody>
+</table>
+
+Dombrosky, J., M. LaZar, C. Hyland, and S. D. Newsome. Individuals from 
+Isotopes: Can Stable Isotopes Distinguish the Skeletal Remains of Different 
+Cooper’s Hawks (*Astur cooperii*)? To be submitted to Journal of Archaeological 
+Method and Theory.
+
 There are two folders and three Quarto files in this repository. The first
 folder, `data`, includes only one file. It is .txt file that has all the raw
 data necessary to reproduce the analytical figures and tables provided in 
