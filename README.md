@@ -2,6 +2,8 @@ Individuals from Isotopes: Can Stable Isotopes Distinguish the Remains of
 Different Cooper’s Hawks (*Astur cooperii*)?
 --------------------------------------
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17210625.svg)](https://doi.org/10.5281/zenodo.17210625)
+
 <table>
 <colgroup>
 <col width="50%" />
