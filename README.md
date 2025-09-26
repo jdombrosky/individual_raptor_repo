@@ -29,29 +29,29 @@ the manuscript. The columns provided in this file are:
 
   **MSB_Number:** This is the Museum of Southwestern Biology (MSB) Specimen number
   
-  **Individual:** This is the individual number arbitrarily assigned by increasing 
-  MSB Number
+  **Individual:** The individual number (1-20) arbitrarily assigned to each
+  individual Cooper's Hawk specimen by increasing MSB Number.
   
-  **Tissue:** Pertains to whether the observation derives from: bone, muscle, or 
+  **Tissue:** Pertains to whether the observation derives from bone, muscle, or 
   liver.
   
   **Element:** If the observation is from bone tissue, this column specifies what
   skeletal element the observation is. It can be either humerus, ulna, femur, 
   tibiotarsus, rib, or pygostyle.
   
-  **Side:** If the observation is from bone tissue, this column specifies what side
-  of the bird this skeletal element derives from (right or left). Bone that
-  were not sided or where they are axial elements are given NA.
+  **Side:** If the observation is from bone tissue, this column specifies what 
+  side of the bird the skeletal element derives from (right or left). Bones that
+  were not sided or where they are axial skeletal elements are given NA.
   
-  **Bone_Type:** If the observation is from bone tissue, this column what category
-  of bone the skeletal element is by how it grows. The options are long, flat,
-  or irregular.
+  **Bone_Type:** If the observation is from bone tissue, this column indicates 
+  what category of bone the skeletal element is by how it grows. The options are
+  long, flat, or irregular.
   
-  **d13C:** Provides the delta carbon-13 value for each observation expressed in per
-  mille.
-  
-  **d15N:** Provides the delta nitrogen-15 value for each observation expressed in
+  **d13C:** Provides the delta carbon-13 value for each observation expressed in
   per mille.
+  
+  **d15N:** Provides the delta nitrogen-15 value for each observation expressed 
+  in per mille.
   
   **d2H:** Provides the delta two H value for each observation expressed in per 
   mille.
@@ -59,10 +59,9 @@ the manuscript. The columns provided in this file are:
   **CN:** This column provides carbon-to-nitrogen ratios for each observation. 
   Importantly, these are given as mass ratios and not atomic ratios. Converting
   to atomic ratios is easy enough. In `mutate()` function form, it looks like:
-  `mutate(CNatomic = CN * (14/12))`
+  `mutate(CNatomic = CN * (14/12))`.
 
-The `figs` folder is where all of the main and supplemental 
-figures are stored. 
+The `figs` folder is where all of the main and supplemental figures are stored. 
 
 The only manuscript element that cannot be reproduced is Table 1, which is of 
 metadata about each raptor individual we sampled for stable isotope analysis. 
