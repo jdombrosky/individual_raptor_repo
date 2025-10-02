@@ -185,6 +185,19 @@ calculate_overlap <- function(sample_size, sf_data, union_area, max_attempts = 1
 }
 ```
 
+### A Note on Geometry Errors
+The above function was created to avoid GEOS exceptions, for more detailed 
+information see [here](https://github.com/r-spatial/sf/issues/1668). In short,
+`st_intersection()` can only handle so much overlapping elliptical or spherical
+complexity. The below code *does* produce small geometry errors, but does not
+produce GEOS exceptions that stop the code entirely. The geometry errors result 
+in small rounding differences when handling extremely small amounts of 
+curvilinear space. They are unavoidable with the elliptical complexity of this 
+dataset. These small rounding differences do not impact the overall results. 
+This is ostensibly why `st_intersection()` will proceed with a geometry error 
+and not with a GEOS exception. To test this, one can perform a sensitivity 
+analysis by tweaking `st_set_precision()`.
+
 ## Model Overlap as Individuals Increase
 ```{r, warning=FALSE}
 set.seed(3844)
