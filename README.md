@@ -25,7 +25,7 @@ Cooper’s Hawks (*Astur cooperii*)? To be submitted to Journal of Archaeologica
 Method and Theory.
 
 There are two folders and three Quarto files in this repository. The first
-folder, `data`, includes only one file. It is .txt file that has all the raw
+folder, `data`, includes only one file. It is a .txt file that has all the raw
 data necessary to reproduce the analytical figures and tables provided in 
 the manuscript. The columns provided in this file are:
 
@@ -81,7 +81,7 @@ This file is a little more computationally intensive, but should not take too
 long to run (on the order of 10 or so minutes perhaps). This is where all the
 elliptical overlap calculations are run, which requires a little oomph.
 
-Quarto file 3, `3_predictive_moderling.qmd`, corresponds with all the results
+Quarto file 3, `3_predictive_modeling.qmd`, corresponds with all the results
 and figures mentioned in section 4.3 of the manuscript. This is the most
 computationally intensive file provided. This is where the different machine
 learning algorithms are tuned and applied. It should take 30 or so minutes to
