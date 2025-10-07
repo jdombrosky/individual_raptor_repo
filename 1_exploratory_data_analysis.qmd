@@ -3,13 +3,45 @@ title: "1. Exploratory Data Analysis"
 author:
 - name: Jonathan Dombrosky
   email: jdombrosky@crowcanyon.org
+  attributes:
+    corresponding: true
+  affiliations: 
+  - ref: crow
+  - ref: unm
+- name: Miranda LaZar
+  affiliations: 
+  - ref: az
+- name: Corrie Hyland
+  affiliations: 
+  - ref: york
+- name: Seth D. Newsome
+  affiliations: 
+  - ref: unm_bio
+affiliations:
+  - id: crow
+    name: Crow Canyon Archaeological Center
+    city: Cortez
+    state: CO
+  - id: unm
+    name: Department of Anthropology, University of New Mexico
+    city: Albuquerque
+  - id: az
+    name: School of Anthropology, University of Arizona
+    city: Tucson
+  - id: york
+    name: Department of Archaeology, University of York
+    city: York
+  - id: unm_bio
+    name: Department of Biology, University of New Mexico
+    city: Albuquerque
 editor: source
 self-contained: true
 date: now
 date-format: "MMMM D, YYYY h:mm A z"
 message: false
 warning: false
-echo: false
+echo: true
+format: html
 ---
 
 ## Libraries
@@ -272,6 +304,7 @@ diff_plot |>
 
 ggsave("figs/fig_2.jpg", dpi = 300, height = 3, width = 7.5)
 ```
+
 ### Five points of data summary
 ```{r}
 diff_plot |> 
@@ -288,7 +321,6 @@ diff_plot |>
   mutate(n = 20,
          percent = round(greater_1.5 / n * 100, 2))
 ```
-
 
 ## Calculate NIDS
 ```{r}
@@ -368,7 +400,6 @@ ggsave("figs/fig_3.jpg", dpi = 300, height = 3.5, width = 7.5)
 ```
 
 ## Figure 4
-
 ```{r}
 samp_nisp <- function(nisp) {
   my_data |> 
@@ -495,7 +526,6 @@ ggsave("figs/fig_4.jpg", dpi = 300, height = 6, width = 7)
 ```
 
 ## SIBER
-
 ### 95% Confidence Ellipse Calculations
 ```{r}
 all_tiss <- my_data |>
@@ -616,13 +646,13 @@ plot_grid(cn_plot, ch_plot, labels = "AUTO", label_colour = "#4d4d4d",
 
 ggsave("figs/supp_fig_1.jpg", dpi = 300, height = 7.5, width = 8)
 ```
+
 ## Individual Specialization (WIC, BIC, TNW, WIC:TNW)
 ### All Bone
 ```{r}
 my_data_bone <- my_data |> 
   filter(Tissue == "Bone")
 ```
-
 
 ```{r}
 # Supplemental Table 1
@@ -662,7 +692,6 @@ my_data_bone |>
             d15N_range = diff(range(d15Ndiet)))
 ```
 
-
 ```{r}
 #| fig-height: 3.5
 #| fig.width: 7.5
@@ -693,4 +722,3 @@ my_data_bone |>
 
 ggsave("figs/supp_fig_5.jpg", dpi = 300, height = 3.5, width = 7.5)
 ```
-

@@ -3,15 +3,48 @@ title: "2. Sampling Overlap"
 author:
 - name: Jonathan Dombrosky
   email: jdombrosky@crowcanyon.org
+  attributes:
+    corresponding: true
+  affiliations: 
+  - ref: crow
+  - ref: unm
+- name: Miranda LaZar
+  affiliations: 
+  - ref: az
+- name: Corrie Hyland
+  affiliations: 
+  - ref: york
+- name: Seth D. Newsome
+  affiliations: 
+  - ref: unm_bio
+affiliations:
+  - id: crow
+    name: Crow Canyon Archaeological Center
+    city: Cortez
+    state: CO
+  - id: unm
+    name: Department of Anthropology, University of New Mexico
+    city: Albuquerque
+  - id: az
+    name: School of Anthropology, University of Arizona
+    city: Tucson
+  - id: york
+    name: Department of Archaeology, University of York
+    city: York
+  - id: unm_bio
+    name: Department of Biology, University of New Mexico
+    city: Albuquerque
 editor: source
 self-contained: true
 date: now
 date-format: "MMMM D, YYYY h:mm A z"
 message: false
 warning: false
-echo: false
+echo: true
+format: html
 ---
-## Packages Needed
+
+## Libraries
 ```{r}
 library(tidyverse)
 library(SIBER)
@@ -45,10 +78,9 @@ my_data <- read.table("data/individual_raptor.txt",
          d2Hdiet = d2H - D2H)
 ```
 
-
-## Create Functions
-### replace number(0) with 0
 ```{r}
+# Create Function to replace number(0) with 0
+
 replace_zero <- function(x) {
      if(is.list(x)) lapply(x, replace_zero)
      else ifelse(length(x) == 0, 0, x)
@@ -200,6 +232,8 @@ analysis by tweaking `st_set_precision()`.
 
 ## Model Overlap as Individuals Increase
 ```{r, warning=FALSE}
+#| output: false
+
 set.seed(3844)
 all_tiss <- map_dfr(2:19, ~ calculate_overlap(.x, sf_ellipses, union_area)) |> 
   mutate(group = "All Tissue")
@@ -289,6 +323,8 @@ overlap <- i_bone |>
 
 # Model Overlap as Individuals Increase
 ```{r, warning=FALSE}
+#| output: false
+
 set.seed(7959)
 all_bone <- map_dfr(2:19, ~ calculate_overlap(.x, sf_ellipses, union_area)) |> 
   mutate(group = "All Bone")
@@ -379,13 +415,14 @@ overlap <- i_long |>
 
 # Model Overlap as Individuals Increase
 ```{r, warning=FALSE}
+#| output: false
+
 set.seed(5941)
 long_bone <- map_dfr(2:19, ~ calculate_overlap(.x, sf_ellipses, union_area)) |> 
   mutate(group = "Long Bone")
 ```
 
 ## Figures
-
 ### Supplemental Figure 2
 ```{r}
 #| fig-height: 5

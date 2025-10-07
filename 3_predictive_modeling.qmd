@@ -3,13 +3,45 @@ title: "3. Predictive Modeling"
 author:
 - name: Jonathan Dombrosky
   email: jdombrosky@crowcanyon.org
+  attributes:
+    corresponding: true
+  affiliations: 
+  - ref: crow
+  - ref: unm
+- name: Miranda LaZar
+  affiliations: 
+  - ref: az
+- name: Corrie Hyland
+  affiliations: 
+  - ref: york
+- name: Seth D. Newsome
+  affiliations: 
+  - ref: unm_bio
+affiliations:
+  - id: crow
+    name: Crow Canyon Archaeological Center
+    city: Cortez
+    state: CO
+  - id: unm
+    name: Department of Anthropology, University of New Mexico
+    city: Albuquerque
+  - id: az
+    name: School of Anthropology, University of Arizona
+    city: Tucson
+  - id: york
+    name: Department of Archaeology, University of York
+    city: York
+  - id: unm_bio
+    name: Department of Biology, University of New Mexico
+    city: Albuquerque
 editor: source
 self-contained: true
 date: now
 date-format: "MMMM D, YYYY h:mm A z"
 message: false
 warning: false
-echo: false
+echo: true
+format: html
 ---
 
 ## Libraries
@@ -53,7 +85,7 @@ my_data <- read.table("data/individual_raptor.txt",
   as_tibble()
 ```
 
-## Model Specificaitons
+## Model Specifications
 ```{r}
 lda_spec <- discrim_linear() |> 
   set_engine("MASS") |> 
@@ -69,9 +101,7 @@ knn_spec <- nearest_neighbor(neighbors = tune(), weight_func = tune()) |>
 ```
 
 ## Modeling δ13Cdiet and δ15Ndiet
-
 ### Predicting Individuals from All Tissue
-
 #### Wrangle and Split Data
 ```{r}
 set.seed(9234)
@@ -198,7 +228,6 @@ cn_all_metrics_tiss <- rbind(lda_metrics_tiss, rf_metrics_tiss,
 ```
 
 ### Predicting Individuals from All Bone
-
 #### Wrangle and Split Data
 ```{r}
 set.seed(9226)
@@ -259,7 +288,6 @@ gr_all_bone_cn |>
 ```
 
 #### Plot Performance
-
 ##### Plot Results of Tuning Process
 ```{r}
 autoplot(gr_all_bone_cn, id = "simple_KNN", metric = "accuracy") +
@@ -328,7 +356,6 @@ cn_all_metrics_bone <- rbind(lda_metrics_bone, rf_metrics_bone,
 ```
 
 ### Predicting Individuals from Long Bone
-
 #### Wrangle and Split Data
 ```{r}
 set.seed(7051)
@@ -389,7 +416,6 @@ gr_long_bone_cn  |>
 ```
 
 #### Plot Performance
-
 ##### Plot Results of Tuning Process
 ```{r}
 autoplot(gr_long_bone_cn, id = "simple_KNN", metric = "accuracy") +
@@ -523,9 +549,7 @@ rbind(cn_all_metrics_tiss, cn_all_metrics_long, cn_all_metrics_bone)|>
 ```
 
 ## Modeling δ13Cdiet, δ15Ndiet, and δ2Hdiet
-
 ### Predicting Individuals from All Tissue
-
 #### Wrangle and Split Data
 ```{r}
 set.seed(3782)
@@ -545,6 +569,7 @@ set.seed(5952)
 
 ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
 ```
+
 #### Recipe
 ```{r}
 ind_rec <- recipe(Individual ~ d13Cdiet + d15Ndiet + d2Hdiet, data = my_data_all_tiss) |> 
@@ -582,8 +607,8 @@ gr_all_tiss_cnh |>
   group_by(model) |> 
   count()
 ```
-#### Plot Performance
 
+#### Plot Performance
 ##### Plot Results of Tuning Process
 ```{r}
 autoplot(gr_all_tiss_cnh, id = "simple_KNN", metric = "accuracy") +
@@ -652,7 +677,6 @@ cnh_all_metrics_tiss <- rbind(lda_metrics_tiss, rf_metrics_tiss,
 ```
 
 ### Predicting Individuals from All Bone
-
 #### Wrangle and Split Data
 ```{r}
 set.seed(5073)
@@ -713,7 +737,6 @@ gr_all_bone_cnh |>
 ```
 
 #### Plot Performance
-
 ##### Plot Results of Tuning Process
 ```{r}
 autoplot(gr_all_bone_cnh, id = "simple_KNN", metric = "accuracy") +
@@ -782,7 +805,6 @@ cnh_all_metrics_bone <- rbind(lda_metrics_bone, rf_metrics_bone,
 ```
 
 ### Predicting Individuals from Long Bone
-
 #### Wrangle and Split Data
 ```{r}
 set.seed(2746)
@@ -843,7 +865,6 @@ gr_long_bone_cnh |>
 ```
 
 #### Plot Performance
-
 ##### Plot Results of Tuning Process
 ```{r}
 autoplot(gr_long_bone_cnh, id = "simple_KNN", metric = "accuracy") +
@@ -1106,4 +1127,3 @@ gr_long_bone_cnh |>
   summarize(n = n_distinct(.config), .groups = "drop") |> 
   summarize(sum = sum(n))
 ```
-
