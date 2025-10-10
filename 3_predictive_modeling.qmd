@@ -828,7 +828,8 @@ ind_folds <- vfold_cv(ind_train, strata = Individual, pool = 0)
 
 #### Recipe
 ```{r}
-ind_rec <- recipe(Individual ~ d13Cdiet + d15Ndiet + d2Hdiet, data = my_data_long_bone) |> 
+ind_rec <- recipe(Individual ~ d13Cdiet + d15Ndiet + d2Hdiet, 
+                  data = my_data_long_bone) |> 
   step_impute_mean(d13Cdiet, d15Ndiet, d2Hdiet)
 ```
 
@@ -1042,6 +1043,7 @@ all_rank |>
 
 ggsave("figs/supp_fig_4.jpg", dpi = 300, height = 5.5, width = 5.5)
 
+# t-test from section 4.3 of the manuscript
 t.test(mean ~ model_agg, data = all_rank) |> 
   tidy()
 ```
